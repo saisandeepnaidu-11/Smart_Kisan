@@ -17,4 +17,4 @@ RUN npm run build
 EXPOSE 8080
 
 # Use the start script (vite preview) to serve the built app
-CMD ["npm", "start"]
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "7860"]
