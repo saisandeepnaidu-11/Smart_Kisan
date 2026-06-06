@@ -22,7 +22,7 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center" style={{backgroundImage: "url('/background.jpg')", backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat"}}>
+      <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center" style={{ backgroundImage: "url('/background.jpg')", backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat" }}>
         <div className="text-xl text-gray-600">Loading...</div>
       </div>
     );
@@ -61,7 +61,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar currentPage={currentPage} onNavigate={setCurrentPage} />
+      <Navbar currentPage={currentPage} onNavigate={(page) => setCurrentPage(page as AppPage)} />
 
       {currentPage === 'dashboard' && (
         <>

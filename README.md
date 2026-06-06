@@ -152,6 +152,7 @@ project/
 2. **Authentication**: Sign up or login
 3. **Dashboard**: Manage land listings and profile
 4. **Add Land**: Create new land listings
+
 5. **Manage Listings**: Update land information
 6. **Contact Management**: Share contact details with farmers
 
@@ -219,5 +220,8 @@ project/
 ---
 
 **Smart Kisan** - Revolutionizing agriculture through technology! 🌾✨
+
+
+
 
 

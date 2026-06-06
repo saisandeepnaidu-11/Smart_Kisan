@@ -93,9 +93,18 @@ def login(data: LoginModel):
 def get_profile(user_id: str):
     for role in ["farmers", "landowners"]:
         try:
-            user = db[role].find_one({"_id": ObjectId(user_id)})
+            # First try to find by ObjectId
+            try:
+                user = db[role].find_one({"_id": ObjectId(user_id)})
+                if user:
+                    user["_id"] = str(user["_id"])
+                    return user
+            except:
+                pass
+            
+            # If ObjectId fails, try to find by string ID field (for sample_owner_1, etc.)
+            user = db[role].find_one({"_id": user_id})
             if user:
-                user["_id"] = str(user["_id"])
                 return user
         except:
             continue
@@ -171,3 +180,74 @@ def delete_land(land_id: str):
 def store_form(data: FormDataModel):
     db["forms"].insert_one(data.data)
     return {"message": "Form data stored successfully in farm database"}
+
+@app.on_event("startup")
+async def startup_event():
+    """Create sample landowner profiles if they don't exist"""
+    sample_owners = [
+        {
+            "_id": "sample_owner_1",
+            "email": "owner1@example.com",
+            "password": "password123",
+            "full_name": "Rajesh Kumar",
+            "role": "landowner",
+            "phone": "9876543210",
+            "address": "Punjab, India",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        },
+        {
+            "_id": "sample_owner_2",
+            "email": "owner2@example.com",
+            "password": "password123",
+            "full_name": "Priya Singh",
+            "role": "landowner",
+            "phone": "9876543211",
+            "address": "Karnataka, India",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        },
+        {
+            "_id": "sample_owner_3",
+            "email": "owner3@example.com",
+            "password": "password123",
+            "full_name": "Amit Patel",
+            "role": "landowner",
+            "phone": "9876543212",
+            "address": "Maharashtra, India",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        },
+        {
+            "_id": "sample_owner_4",
+            "email": "owner4@example.com",
+            "password": "password123",
+            "full_name": "Kavya Reddy",
+            "role": "landowner",
+            "phone": "9876543213",
+            "address": "Telangana, India",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        },
+        {
+            "_id": "sample_owner_5",
+            "email": "owner5@example.com",
+            "password": "password123",
+            "full_name": "Suresh Rao",
+            "role": "landowner",
+            "phone": "9876543214",
+            "address": "Andhra Pradesh, India",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+    ]
+    
+    for owner in sample_owners:
+        existing = db["landowners"].find_one({"_id": owner["_id"]})
+        if not existing:
+            db["landowners"].insert_one(owner)
+            print(f"Created sample landowner: {owner['_id']}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

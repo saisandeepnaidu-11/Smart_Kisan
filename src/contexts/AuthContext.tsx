@@ -38,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string) => {
     try {
       const response = await authAPI.login(email, password);
-      
+
       const userData: User = {
         _id: response.user_id || response._id,
         email: response.email,
@@ -57,7 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signup = async (email: string, password: string, fullName: string, role: string) => {
     try {
-      const response = await authAPI.signup(email, password, fullName, role as 'farmer' | 'landowner');
+      const response = await authAPI.signup(email, password, fullName, role as any);
       // After successful signup, automatically log in the user
       await login(email, password);
     } catch (error) {
@@ -79,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const storedUser = localStorage.getItem('user');
         const storedProfile = localStorage.getItem('profile');
-        
+
         if (storedUser && storedProfile) {
           const userData = JSON.parse(storedUser);
           const profileData = JSON.parse(storedProfile);

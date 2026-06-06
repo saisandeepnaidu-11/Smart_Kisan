@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { landsAPI, profileAPI } from '../lib/mongodb';
-import { MapPin, DollarSign, Droplet, Mountain, Phone, Mail } from 'lucide-react';
+import { MapPin, DollarSign, Droplet, Mountain, Phone, Mail, Search, RefreshCw, Loader2 } from 'lucide-react';
 
 export const FarmerDashboard: React.FC = () => {
   const { user, profile, refreshProfile } = useAuth();
   const [availableLands, setAvailableLands] = useState<any[]>([]);
+  const [filteredLands, setFilteredLands] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [selectedLand, setSelectedLand] = useState<any>(null);
   const [loadingContact, setLoadingContact] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterSoil, setFilterSoil] = useState('');
+  const [filterMaxPrice, setFilterMaxPrice] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -27,9 +33,31 @@ export const FarmerDashboard: React.FC = () => {
     }
   }, [user]);
 
+  // Apply filters whenever lands or filter values change
+  useEffect(() => {
+    let lands = availableLands;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      lands = lands.filter(l =>
+        l.title?.toLowerCase().includes(q) ||
+        l.location?.toLowerCase().includes(q) ||
+        l.description?.toLowerCase().includes(q)
+      );
+    }
+    if (filterSoil.trim()) {
+      lands = lands.filter(l => l.soil_type?.toLowerCase().includes(filterSoil.toLowerCase()));
+    }
+    if (filterMaxPrice.trim()) {
+      const max = parseFloat(filterMaxPrice);
+      if (!isNaN(max)) {
+        lands = lands.filter(l => !l.price_per_acre || l.price_per_acre <= max);
+      }
+    }
+    setFilteredLands(lands);
+  }, [availableLands, searchQuery, filterSoil, filterMaxPrice]);
+
   const fetchFarmerProfile = async () => {
     if (!user) return;
-
     try {
       const profileData = await profileAPI.getProfile(user._id);
       if (profileData) {
@@ -37,30 +65,36 @@ export const FarmerDashboard: React.FC = () => {
           name: profileData.full_name || '',
           email: profileData.email || '',
           phone: profileData.phone || '',
-          experience_years: '', // MongoDB doesn't have separate farmer_profiles table
+          experience_years: '',
           address: profileData.address || '',
         });
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
     }
-
     setLoading(false);
   };
 
   const fetchAvailableLands = async () => {
     try {
+      setApiError(null);
       const lands = await landsAPI.getLands();
-      const availableLands = lands.filter(land => land.status === 'available');
-      setAvailableLands(availableLands);
-    } catch (err) {
-      console.error('Error in fetchAvailableLands:', err);
+      const available = lands.filter(land => land.status === 'available');
+      setAvailableLands(available);
+    } catch (err: any) {
+      console.error('Error fetching lands:', err);
+      const msg = err?.message || String(err);
+      if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('networkerror')) {
+        setApiError('Cannot connect to the backend server. Please make sure it is running on port 8000.');
+      } else {
+        setApiError('Failed to load lands: ' + msg);
+      }
     }
   };
 
   const handleSaveProfile = async () => {
     if (!user) return;
-
+    setSaving(true);
     try {
       await profileAPI.updateProfile(user._id, {
         full_name: formData.name,
@@ -68,26 +102,22 @@ export const FarmerDashboard: React.FC = () => {
         phone: formData.phone,
         address: formData.address,
       });
-
       await refreshProfile();
       await fetchFarmerProfile();
       setEditing(false);
     } catch (error) {
       console.error('Error updating profile:', error);
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleContactLandowner = async (land: any) => {
     setLoadingContact(true);
     setShowContactModal(true);
-    
     try {
-      // Fetch the landowner's profile details
       const ownerProfile = await profileAPI.getProfile(land.owner_id);
-      if (!ownerProfile) {
-        throw new Error('Could not find landowner details');
-      }
-      
+      if (!ownerProfile) throw new Error('Could not find landowner details');
       setSelectedLand({ ...land, profiles: ownerProfile });
     } catch (error) {
       console.error('Error fetching landowner details:', error);
@@ -99,65 +129,35 @@ export const FarmerDashboard: React.FC = () => {
   };
 
   const handleCallLandowner = () => {
-    if (selectedLand?.profiles?.phone) {
-      window.open(`tel:${selectedLand.profiles.phone}`);
-    }
+    if (selectedLand?.profiles?.phone) window.open(`tel:${selectedLand.profiles.phone}`);
   };
 
   const handleEmailLandowner = () => {
     if (selectedLand?.profiles?.email) {
       const landowner = selectedLand.profiles;
       const subject = `Interest in Land: ${selectedLand.title}`;
-      const body = `Hello ${landowner.full_name},
-
-I am interested in your land listing with the following details:
-
-Land Information:
-- Title: ${selectedLand.title}
-- Location: ${selectedLand.location}
-- Area: ${selectedLand.area} acres
-${selectedLand.price_per_acre ? `- Price: ₹${selectedLand.price_per_acre.toLocaleString()}/acre\n` : ''}${selectedLand.soil_type ? `- Soil Type: ${selectedLand.soil_type}\n` : ''}${selectedLand.water_availability ? `- Water Source: ${selectedLand.water_availability}\n` : ''}
-I would like to discuss this opportunity further. Please contact me at your earliest convenience.
-
-My contact details:
-- Name: ${profile?.full_name || formData.name}
-- Phone: ${profile?.phone || formData.phone || 'Will provide'}
-- Email: ${profile?.email || formData.email || 'Will provide'}
-
-Best regards,
-${profile?.full_name || formData.name}`;
-
-      const mailtoLink = `mailto:${landowner.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      window.open(mailtoLink);
+      const body = `Hello ${landowner.full_name},\n\nI am interested in your land listing:\n\n- Title: ${selectedLand.title}\n- Location: ${selectedLand.location}\n- Area: ${selectedLand.area} acres\n${selectedLand.price_per_acre ? `- Price: ₹${selectedLand.price_per_acre.toLocaleString()}/acre\n` : ''}${selectedLand.soil_type ? `- Soil Type: ${selectedLand.soil_type}\n` : ''}\nPlease contact me at your earliest convenience.\n\nBest regards,\n${profile?.full_name || formData.name}\nPhone: ${profile?.phone || formData.phone || 'Will provide'}\nEmail: ${profile?.email || formData.email}`;
+      window.open(`mailto:${landowner.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
     }
   };
 
   const handleCopyContactInfo = () => {
     const landowner = selectedLand?.profiles;
-    const landDetails = selectedLand;
-    
-    const contactText = `
-Land Details:
-Title: ${landDetails.title}
-Location: ${landDetails.location}
-Area: ${landDetails.area} acres
-${landDetails.price_per_acre ? `Price: ₹${landDetails.price_per_acre.toLocaleString()}/acre\n` : ''}${landDetails.soil_type ? `Soil Type: ${landDetails.soil_type}\n` : ''}${landDetails.water_availability ? `Water Source: ${landDetails.water_availability}\n` : ''}
-Landowner Contact:
-Name: ${landowner?.full_name || 'Not provided'}
-Phone: ${landowner?.phone || 'Not provided'}
-Email: ${landowner?.email || 'Not provided'}`;
-    
-    navigator.clipboard.writeText(contactText.trim()).then(() => {
-      alert('Contact information copied to clipboard!');
-    }).catch(() => {
-      alert('Failed to copy contact information.');
-    });
+    const text = `Land: ${selectedLand.title}\nLocation: ${selectedLand.location}\nArea: ${selectedLand.area} acres\nOwner: ${landowner?.full_name || 'N/A'}\nPhone: ${landowner?.phone || 'N/A'}\nEmail: ${landowner?.email || 'N/A'}`;
+    navigator.clipboard.writeText(text).then(() => alert('Contact info copied!')).catch(() => alert('Failed to copy.'));
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterSoil('');
+    setFilterMaxPrice('');
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg text-gray-600">Loading...</div>
+        <Loader2 className="w-8 h-8 text-green-600 animate-spin mr-3" />
+        <span className="text-lg text-gray-600">Loading your dashboard...</span>
       </div>
     );
   }
@@ -169,22 +169,35 @@ Email: ${landowner?.email || 'Not provided'}`;
         <p className="text-gray-600">Manage your profile and explore available lands</p>
       </div>
 
+      {/* Backend Error Banner */}
+      {apiError && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start justify-between gap-4">
+          <div>
+            <p className="text-red-700 font-semibold">⚠️ Connection Error</p>
+            <p className="text-red-600 text-sm mt-1">{apiError}</p>
+            <p className="text-red-500 text-xs mt-1">Run: <code className="bg-red-100 px-1 rounded">python -m uvicorn main:app --reload --port 8000</code> in the backend folder.</p>
+          </div>
+          <button onClick={fetchAvailableLands} className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm whitespace-nowrap">Retry</button>
+        </div>
+      )}
+
+      {/* Profile Section */}
       <div className="bg-white rounded-xl shadow-md p-6 mb-8">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Your Profile</h2>
           <button
-            onClick={() => (editing ? handleSaveProfile() : setEditing(true))}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            onClick={() => editing ? handleSaveProfile() : setEditing(true)}
+            disabled={saving}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-60 flex items-center gap-2"
           >
-            {editing ? 'Save Profile' : 'Edit Profile'}
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            {editing ? (saving ? 'Saving...' : 'Save Profile') : 'Edit Profile'}
           </button>
         </div>
 
         <div className="grid md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Full Name
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
             <input
               type="text"
               value={formData.name}
@@ -196,9 +209,7 @@ Email: ${landowner?.email || 'Not provided'}`;
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Email Address
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
             <input
               type="email"
               value={formData.email}
@@ -210,9 +221,7 @@ Email: ${landowner?.email || 'Not provided'}`;
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Phone Number
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
             <input
               type="tel"
               value={formData.phone}
@@ -224,9 +233,7 @@ Email: ${landowner?.email || 'Not provided'}`;
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Experience (years)
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Experience (years)</label>
             <input
               type="number"
               value={formData.experience_years}
@@ -238,9 +245,7 @@ Email: ${landowner?.email || 'Not provided'}`;
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Address
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
             <textarea
               value={formData.address}
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
@@ -253,60 +258,88 @@ Email: ${landowner?.email || 'Not provided'}`;
         </div>
       </div>
 
+      {/* Available Lands */}
       <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-4">
           <h2 className="text-2xl font-bold text-gray-900">Available Lands</h2>
-          <div className="flex space-x-3">
-            <button
-              onClick={fetchAvailableLands}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Refresh Lands
-            </button>
-            <button
-              onClick={async () => {
-                console.log('Current availableLands state:', availableLands);
-                console.log('User:', user);
-                console.log('Profile:', profile);
-                
-                // Test fetching profiles directly
-                if (user) {
-                  try {
-                    const allProfiles = await profileAPI.getProfile(user._id);
-                    console.log('Profile data:', allProfiles);
-                  } catch (error) {
-                    console.log('Profile error:', error);
-                  }
-                }
-              }}
-              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-            >
-              Debug Info
-            </button>
+          <button
+            onClick={fetchAvailableLands}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+        </div>
+
+        {/* Search & Filter Bar */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6 p-4 bg-gray-50 rounded-xl">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search by location or title..."
+              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-sm"
+            />
+          </div>
+          <input
+            type="text"
+            value={filterSoil}
+            onChange={e => setFilterSoil(e.target.value)}
+            placeholder="Filter by soil type..."
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-sm"
+          />
+          <div className="flex gap-2">
+            <input
+              type="number"
+              value={filterMaxPrice}
+              onChange={e => setFilterMaxPrice(e.target.value)}
+              placeholder="Max price/acre (₹)"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-sm"
+            />
+            {(searchQuery || filterSoil || filterMaxPrice) && (
+              <button onClick={clearFilters} className="px-3 py-2 text-xs bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors whitespace-nowrap">
+                Clear
+              </button>
+            )}
           </div>
         </div>
 
-        {availableLands.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            No available lands found. Check back later for new listings!
+        {/* Results count */}
+        <p className="text-sm text-gray-500 mb-4">
+          Showing {filteredLands.length} of {availableLands.length} available land{availableLands.length !== 1 ? 's' : ''}
+        </p>
+
+        {filteredLands.length === 0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <Mountain className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+            <p className="text-lg font-medium text-gray-500">
+              {availableLands.length === 0 ? 'No available lands yet.' : 'No lands match your filters.'}
+            </p>
+            <p className="text-sm mt-1">
+              {availableLands.length === 0
+                ? 'Check back later for new listings from landowners!'
+                : 'Try adjusting your search or filter criteria.'}
+            </p>
+            {availableLands.length > 0 && (
+              <button onClick={clearFilters} className="mt-3 text-green-600 text-sm underline hover:text-green-700">
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {availableLands.map((land) => (
-              <div
-                key={land.id}
-                className="border border-gray-200 rounded-xl p-5 hover:shadow-lg transition-shadow"
-              >
+            {filteredLands.map((land) => (
+              <div key={land._id || land.id} className="border border-gray-200 rounded-xl p-5 hover:shadow-lg transition-shadow flex flex-col">
                 <div className="flex justify-between items-start mb-3">
                   <h3 className="text-xl font-bold text-gray-900">{land.title}</h3>
-                  <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">
-                    Available
-                  </span>
+                  <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">Available</span>
                 </div>
 
                 <p className="text-gray-600 text-sm mb-4 line-clamp-2">{land.description}</p>
 
-                <div className="space-y-2 mb-4">
+                <div className="space-y-2 mb-4 flex-1">
                   <div className="flex items-center text-gray-700">
                     <MapPin className="w-4 h-4 mr-2 text-green-600" />
                     <span className="text-sm">{land.location}</span>
@@ -320,7 +353,10 @@ Email: ${landowner?.email || 'Not provided'}`;
                   {land.price_per_acre && (
                     <div className="flex items-center text-gray-700">
                       <DollarSign className="w-4 h-4 mr-2 text-green-600" />
-                      <span className="text-sm">₹{land.price_per_acre.toLocaleString()}/acre</span>
+                      <span className="text-sm">
+                        ₹{land.price_per_acre.toLocaleString()}/acre
+                        <span className="text-gray-400 ml-1">(Total: ₹{(land.price_per_acre * land.area).toLocaleString()})</span>
+                      </span>
                     </div>
                   )}
 
@@ -336,15 +372,11 @@ Email: ${landowner?.email || 'Not provided'}`;
                       <span className="text-sm">{land.water_availability}</span>
                     </div>
                   )}
-
-                  <div className="text-sm text-gray-600">
-                    <span className="font-medium">Owner:</span> {land.profiles?.full_name}
-                  </div>
                 </div>
 
                 <button
                   onClick={() => handleContactLandowner(land)}
-                  className="w-full flex items-center justify-center space-x-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  className="w-full flex items-center justify-center space-x-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors mt-auto"
                 >
                   <Phone className="w-4 h-4" />
                   <span>Contact Owner</span>
@@ -358,90 +390,57 @@ Email: ${landowner?.email || 'Not provided'}`;
       {/* Contact Modal */}
       {showContactModal && selectedLand && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-gray-900">Contact Landowner</h3>
-              <button
-                onClick={() => setShowContactModal(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
+              <button onClick={() => setShowContactModal(false)} className="text-gray-500 hover:text-gray-700 text-xl font-bold">✕</button>
             </div>
 
             {loadingContact ? (
               <div className="text-center py-8">
-                <div className="text-gray-600">Loading contact details...</div>
+                <Loader2 className="w-8 h-8 text-green-600 animate-spin mx-auto mb-3" />
+                <p className="text-gray-600">Loading contact details...</p>
               </div>
             ) : (
               <>
                 <div className="mb-6 space-y-4">
                   <div className="bg-gray-50 rounded-lg p-4">
                     <h4 className="font-semibold text-gray-800 mb-3">Land Details</h4>
-                    <div className="space-y-2">
-                      <p className="text-gray-700"><span className="font-medium">Title:</span> {selectedLand.title}</p>
-                      <p className="text-gray-700"><span className="font-medium">Location:</span> {selectedLand.location}</p>
-                      <p className="text-gray-700"><span className="font-medium">Area:</span> {selectedLand.area} acres</p>
-                      {selectedLand.price_per_acre && (
-                        <p className="text-gray-700">
-                          <span className="font-medium">Price:</span> ₹{selectedLand.price_per_acre.toLocaleString()}/acre
-                        </p>
-                      )}
-                      {selectedLand.soil_type && (
-                        <p className="text-gray-700">
-                          <span className="font-medium">Soil Type:</span> {selectedLand.soil_type}
-                        </p>
-                      )}
-                      {selectedLand.water_availability && (
-                        <p className="text-gray-700">
-                          <span className="font-medium">Water Source:</span> {selectedLand.water_availability}
-                        </p>
-                      )}
+                    <div className="space-y-1.5 text-sm text-gray-700">
+                      <p><span className="font-medium">Title:</span> {selectedLand.title}</p>
+                      <p><span className="font-medium">Location:</span> {selectedLand.location}</p>
+                      <p><span className="font-medium">Area:</span> {selectedLand.area} acres</p>
+                      {selectedLand.price_per_acre && <p><span className="font-medium">Price:</span> ₹{selectedLand.price_per_acre.toLocaleString()}/acre</p>}
+                      {selectedLand.soil_type && <p><span className="font-medium">Soil:</span> {selectedLand.soil_type}</p>}
+                      {selectedLand.water_availability && <p><span className="font-medium">Water:</span> {selectedLand.water_availability}</p>}
                     </div>
                   </div>
 
                   <div className="bg-gray-50 rounded-lg p-4">
                     <h4 className="font-semibold text-gray-800 mb-3">Landowner Details</h4>
-                    <div className="space-y-2">
-                      <p className="text-gray-700">
-                        <span className="font-medium">Name:</span> {selectedLand.profiles?.full_name || 'Not provided'}
-                      </p>
-                      <p className="text-gray-700">
-                        <span className="font-medium">Phone:</span> {selectedLand.profiles?.phone || 'Not provided'}
-                      </p>
-                      <p className="text-gray-700">
-                        <span className="font-medium">Email:</span> {selectedLand.profiles?.email || 'Not provided'}
-                      </p>
+                    <div className="space-y-1.5 text-sm text-gray-700">
+                      <p><span className="font-medium">Name:</span> {selectedLand.profiles?.full_name || 'Not provided'}</p>
+                      <p><span className="font-medium">Phone:</span> {selectedLand.profiles?.phone || 'Not provided'}</p>
+                      <p><span className="font-medium">Email:</span> {selectedLand.profiles?.email || 'Not provided'}</p>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap gap-3">
                   {selectedLand.profiles?.phone && (
-                    <button
-                      onClick={handleCallLandowner}
-                      className="flex-1 flex items-center justify-center space-x-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                    >
+                    <button onClick={handleCallLandowner} className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm">
                       <Phone className="w-4 h-4" />
-                      <span>Call</span>
+                      Call
                     </button>
                   )}
-                  
                   {selectedLand.profiles?.email && (
-                    <button
-                      onClick={handleEmailLandowner}
-                      className="flex-1 flex items-center justify-center space-x-2 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
+                    <button onClick={handleEmailLandowner} className="flex-1 flex items-center justify-center gap-2 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
                       <Mail className="w-4 h-4" />
-                      <span>Email</span>
+                      Email
                     </button>
                   )}
-                  
-                  <button
-                    onClick={handleCopyContactInfo}
-                    className="flex-1 flex items-center justify-center space-x-2 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                  >
-                    <span>Copy Details</span>
+                  <button onClick={handleCopyContactInfo} className="flex-1 flex items-center justify-center py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm">
+                    Copy Details
                   </button>
                 </div>
               </>
@@ -449,7 +448,6 @@ Email: ${landowner?.email || 'Not provided'}`;
           </div>
         </div>
       )}
-
     </div>
   );
 };
