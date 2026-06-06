@@ -1,5 +1,5 @@
 // MongoDB API service for authentication and data management
-const API_BASE_URL = 'http://localhost:8000'; // FastAPI backend URL
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 export type UserRole = 'farmer' | 'landowner';
 
